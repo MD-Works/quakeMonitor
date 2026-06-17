@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solar–Seismic Live Monitor • CH-HSS + Bz + Kp + M≥5</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; box-sizing: border-box; }
+    body {
+      background: #0b1a2f; color: #e0e8f0;
+      font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 1.5rem 1rem 2.5rem;
+    }
+    h1 { font-weight: 400; font-size: 1.7rem; letter-spacing: 1px; margin-bottom: 0.3rem; color: #d4e6ff; }
+    .subtitle { font-size: 0.9rem; color: #8aa0b8; margin-bottom: 2rem; text-align: center; }
+    .dashboard { max-width: 1100px; width: 100%; display: flex; flex-direction: column; gap: 1.8rem; }
+    .card {
+      background: #11243e; border-radius: 20px; padding: 1.4rem 1.4rem 1.8rem;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.5);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+    .col { flex: 1 1 280px; }
+    .metric {
+      display: flex; flex-direction: column; align-items: center;
+      background: #0a1a2c; border-radius: 18px; padding: 1.2rem 0.8rem;
+    }
+    .metric .value { font-size: 2.8rem; font-weight: 600; line-height: 1.1; }
+    .metric .label { text-transform: uppercase; letter-spacing: 2px; font-size: 0.75rem; color: #8aa0b8; margin-top: 0.3rem; }
+    .badge { display: inline-block; padding: 0.2rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.8rem; margin-top: 0.5rem; }
+    .alert-green { background: #1b4b3c; color: #b1f0d8; }
+    .alert-yellow { background: #5c4a1f; color: #ffe08a; }
+    .alert-red { background: #5c2a2a; color: #ffb3b3; }
+    canvas { width: 100%; height: auto; border-radius: 14px; background: #0a1a2c; }
+    .earthquake-list { max-height: 260px; overflow-y: auto; font-size: 0.85rem; margin-top: 1rem; padding-right: 4px; }
+    .quake-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.5rem 0.6rem; border-bottom: 1px solid #1e3855; color: #cbdcea;
+      flex-wrap: wrap; gap: 0.3rem;
+    }
+    .mag { font-weight: 700; background: #2d4b6e; padding: 0.2rem 0.7rem; border-radius: 14px; }
+    .footer-note { font-size: 0.7rem; color: #5d7996; text-align: center; margin-top: 1.2rem; }
+    button {
+      background: #1e4060; border: none; color: white; padding: 0.5rem 1.2rem;
+      border-radius: 30px; font-weight: 500; cursor: pointer;
+    }
+    button:hover { background: #2d5a85; }
+    .refresh-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+    .error-msg { color: #ffb3b3; font-size: 0.75rem; margin-top: 0.5rem; }
+    #map { height: 460px; border-radius: 14px; background: #0a1a2c; }
+    @media (max-width: 650px) { .row { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <h1>⚡ Solar–Seismic Watch</h1>
+  <div class="subtitle">Coronal hole stream · IMF Bz · Kp · M≥4+ earthquakes (live + recent)</div>
+
+  <div class="dashboard">
+    <div class="card">
+      <div class="refresh-row" style="justify-content: space-between; align-items: center;">
+        <span style="font-weight: 500; color: #aac8ff;">📡 Real‑time solar wind & geomagnetic indices</span>
+        <div style="display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="daysSlider" style="font-size: 0.85rem; color: #8aa0b8;">Days:</label>
+            <input type="range" id="daysSlider" min="1" max="7" value="2" style="width: 60px;">
+            <span id="daysValue" style="font-weight: 600; min-width: 20px;">2</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="magSlider" style="font-size: 0.85rem; color: #8aa0b8;">Min Mag:</label>
+            <input type="range" id="magSlider" min="1" max="7" step="0.5" value="4" style="width: 60px;">
+            <span id="magValue" style="font-weight: 600; min-width: 20px;">4.0</span>
+          </div>
+          <button id="refreshBtn">⟳ Refresh now</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 1rem;">
+        <div class="col metric" id="speedMetric">
+          <div class="value" id="swSpeed">—</div>
+          <div class="label">Solar Wind (km/s)</div>
+          <span class="badge" id="chHssBadge">⚪ loading</span>
+        </div>
+        <div class="col metric" id="bzMetric">
+          <div class="value" id="bzValue">—</div>
+          <div class="label">IMF Bz (nT)</div>
+          <span class="badge" id="bzBadge">⚪ loading</span>
+        </div>
+        <div class="col metric" id="kpMetric">
+          <div class="value" id="kpValue">—</div>
+          <div class="label">Kp index</div>
+          <span class="badge" id="kpBadge">⚪ loading</span>
+        </div>
+      </div>
+      <div style="margin-top: 1.2rem; font-size: 0.8rem; color: #8aa0b8;" id="updateTime">⏳ Fetching live data …</div>
+      <div class="error-msg" id="errorMsg"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-weight: 400; margin-bottom: 0.8rem;" id="chartTitle">📈 48‑hour trend (IMF Bz & solar wind speed)</h3>
+      <canvas id="trendChart" width="900" height="240"></canvas>
+      <div class="footer-note">Bz (blue) · Speed (orange) · dotted = 450 km/s HSS threshold</div>
+    </div>
+
+    <div class="card">
+      <div class="refresh-row">
+        <h3 style="font-weight: 400;">🌍 Recent Earthquakes (M≥2.5) — Interactive World Map</h3>
+        <button id="fitMapBtn">⟲ Reset View</button>
+      </div>
+      <div id="map"></div>
+      <div class="footer-note">Shows same top 25 as list • Size = magnitude • Color by depth (green shallow → red deep)</div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-weight: 400; margin-bottom: 0.5rem;" id="quakeTitle">📋 Recent significant earthquakes (past 7 days, top 25)</h3>
+      <div class="earthquake-list" id="quakeList">
+        <div class="quake-item">⌛ Loading …</div>
+      </div>
+      <div class="footer-note">Source: USGS • Depth from geometry.coordinates[2]</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    (function() {
+      const REFRESH_MS = 5 * 60 * 1000;
+
+      const swSpeedEl = document.getElementById('swSpeed');
+      const bzValueEl = document.getElementById('bzValue');
+      const kpValueEl = document.getElementById('kpValue');
+      const chHssBadge = document.getElementById('chHssBadge');
+      const bzBadge = document.getElementById('bzBadge');
+      const kpBadge = document.getElementById('kpBadge');
+      const updateTimeEl = document.getElementById('updateTime');
+      const errorMsgEl = document.getElementById('errorMsg');
+      const quakeListEl = document.getElementById('quakeList');
+      const canvas = document.getElementById('trendChart');
+      const ctx = canvas.getContext('2d');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const fitMapBtn = document.getElementById('fitMapBtn');
+      const daysSlider = document.getElementById('daysSlider');
+      const magSlider = document.getElementById('magSlider');
+      const daysValue = document.getElementById('daysValue');
+      const magValue = document.getElementById('magValue');
+      const chartTitle = document.getElementById('chartTitle');
+      const quakeTitle = document.getElementById('quakeTitle');
+
+      let timeLabels = [], timeStamps = [], bzData = [], speedData = [], kpData = [];
+      let quakeEvents = [];
+      let daysShown = 2;
+      let minMagnitude = 4;
+      let MAX_POINTS = 48;
+      let map, markersLayer;
+
+      function classifySpeed(s) {
+        if (s == null || isNaN(s)) return {text:'no data', cls:'alert-green'};
+        if (s >= 500) return {text:'HSS active', cls:'alert-red'};
+        if (s >= 420) return {text:'elevated', cls:'alert-yellow'};
+        return {text:'slow', cls:'alert-green'};
+      }
+      function classifyBz(b) {
+        if (b == null || isNaN(b)) return {text:'no data', cls:'alert-green'};
+        if (b < -5) return {text:'strong south', cls:'alert-red'};
+        if (b < 0) return {text:'southward', cls:'alert-yellow'};
+        return {text:'northward', cls:'alert-green'};
+      }
+      function classifyKp(k) {
+        if (k == null || isNaN(k)) return {text:'no data', cls:'alert-green'};
+        if (k >= 5) return {text:'storm', cls:'alert-red'};
+        if (k >= 4) return {text:'active', cls:'alert-yellow'};
+        return {text:'quiet', cls:'alert-green'};
+      }
+
+      async function fetchSolarWind() {
+        try {
+          const r = await fetch('https://services.swpc.noaa.gov/products/solar-wind/plasma-1-day.json');
+          const d = await r.json();
+          const latest = d[d.length-1];
+          const speed = parseFloat(latest[2]);
+          return {speed: isNaN(speed)?null:speed};
+        } catch(e){ return null; }
+      }
+
+      async function fetchMagData() {
+        try {
+          const r = await fetch('https://services.swpc.noaa.gov/products/solar-wind/mag-1-day.json');
+          const d = await r.json();
+          const latest = d[d.length-1];
+          const bz = parseFloat(latest[3]);
+          return {bz: isNaN(bz)?null:bz};
+        } catch(e){ return null; }
+      }
+
+      async function fetchKp() {
+        try {
+          const r = await fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
+          const d = await r.json();
+          for (let i = d.length-1; i >= 0; i--) {
+            const row = d[i];
+            if (row?.Kp != null) {
+              const kp = parseFloat(row.Kp);
+              if (!isNaN(kp)) return {kp};
+            }
+          }
+          return null;
+        } catch(e){ return null; }
+      }
+
+      async function fetchEarthquakes() {
+        try {
+          const r = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson');
+          const data = await r.json();
+          return data.features || [];
+        } catch(e){ console.warn(e); return []; }
+      }
+
+      function getDepth(feature) {
+        if (feature.geometry?.coordinates?.[2] != null) {
+          return feature.geometry.coordinates[2];
+        }
+        return feature.properties?.depth ?? 0;
+      }
+
+      function renderQuakes(features) {
+        const filtered = features.filter(f => (f.properties?.mag ?? 0) >= minMagnitude);
+        if (!filtered.length) {
+          quakeListEl.innerHTML = '<div class="quake-item">⚠️ No data</div>';
+          return [];
+        }
+        const sorted = [...filtered].sort((a,b) => b.properties.time - a.properties.time);
+        const top25 = sorted.slice(0, 25);
+
+        let html = '';
+        top25.forEach(f => {
+          const p = f.properties || {};
+          const mag = (p.mag ?? 0).toFixed(1);
+          const place = p.place || 'Unknown';
+          const timeStr = p.time ? new Date(p.time).toLocaleString('en-GB',{
+            timeZone:'UTC', hour12:false, day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'
+          }) : 'Unknown';
+          const depth = getDepth(f).toFixed(1);   // Now uses real depth
+          const isLarge = (p.mag ?? 0) >= 5;
+          html += `<div class="quake-item" style="${isLarge?'background:#2a1a1a;border-radius:8px;':''}">
+            <span><span class="mag" style="${isLarge?'background:#8b0000;':''}">M${mag}</span> ${place}</span>
+            <span style="font-size:0.75rem;color:#8aa0b8;">${depth} km · ${timeStr} UTC</span>
+          </div>`;
+        });
+        quakeListEl.innerHTML = html;
+        return top25;
+      }
+
+      function initMap() {
+        if (map) return;
+        map = L.map('map', {worldCopyJump:true}).setView([20,0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+        markersLayer = L.featureGroup().addTo(map);
+
+        // Day/Night Terminator Line
+        const terminatorLayer = L.layerGroup().addTo(map);
+
+        function normalizeLongitude(lon) {
+          const normalized = ((lon % 360) + 360) % 360;
+          return normalized > 180 ? normalized - 360 : normalized;
+        }
+
+        function getSubsolarPosition(date) {
+          const rad = Math.PI / 180;
+          const jd = date.getTime() / 86400000 + 2440587.5;
+          const d = jd - 2451545.0;
+          const M = (357.5291 + 0.98560028 * d) % 360;
+          const C = 1.9148 * Math.sin(rad * M) + 0.0200 * Math.sin(2 * rad * M) + 0.0003 * Math.sin(3 * rad * M);
+          const L = (280.46646 + 0.98564736 * d + C) % 360;
+          const e = 23.439291 - 0.0000134 * d;
+          const lambda = L;
+          const sinDec = Math.sin(rad * e) * Math.sin(rad * lambda);
+          const decl = Math.asin(sinDec);
+          const RA = Math.atan2(Math.cos(rad * e) * Math.sin(rad * lambda), Math.cos(rad * lambda));
+          const RAdeg = (RA / rad + 360) % 360;
+          const T = (jd - 2451545.0) / 36525;
+          const GMSTdeg = (280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T - T * T * T / 38710000) % 360;
+          const subsolarLongitude = normalizeLongitude(RAdeg - GMSTdeg);
+          const subsolarLatitude = decl / rad;
+          return { subsolarLatitude, subsolarLongitude };
+        }
+
+        function getTerminatorLine(date) {
+          const { subsolarLatitude, subsolarLongitude } = getSubsolarPosition(date);
+          const points = [];
+          for (let lon = -180; lon <= 180; lon += 2) {
+            const H = (lon - subsolarLongitude) * Math.PI / 180;
+            const lat = Math.atan2(-Math.cos(H), Math.tan(subsolarLatitude * Math.PI / 180)) * 180 / Math.PI;
+            points.push([lat, lon]);
+          }
+          return points;
+        }
+
+        function updateTerminator() {
+          terminatorLayer.clearLayers();
+          const now = new Date();
+          const { subsolarLatitude, subsolarLongitude } = getSubsolarPosition(now);
+          const line = getTerminatorLine(now);
+          const nightPole = subsolarLatitude >= 0 ? -90 : 90;
+
+          L.polygon([
+            ...line,
+            [nightPole, 180],
+            [nightPole, -180]
+          ], {
+            color: '#000000',
+            fillColor: '#000000',
+            fillOpacity: 0.18,
+            weight: 0,
+            interactive: false
+          }).addTo(terminatorLayer);
+
+          L.polyline(line, {
+            color: 'gold',
+            weight: 1.8,
+            dashArray: '6,8',
+            opacity: 0.9,
+            interactive: false
+          }).addTo(terminatorLayer);
+
+          L.circleMarker([subsolarLatitude, subsolarLongitude], {
+            radius: 8,
+            color: 'gold',
+            fillColor: 'yellow',
+            fillOpacity: 0.9,
+            weight: 1.5
+          }).addTo(terminatorLayer)
+            .bindPopup('Current Sub-Solar Point (where the sun is directly overhead)');
+        }
+
+        updateTerminator();
+        setInterval(updateTerminator, 60 * 60 * 1000); // Update hourly
+      }
+      function updateMap(top25Features) {
+        if (!map) initMap();
+        markersLayer.clearLayers();
+
+        top25Features.forEach(f => {
+          const p = f.properties || {};
+          const coords = f.geometry?.coordinates;
+          if (!coords || coords.length < 2) return;
+
+          const lng = coords[0], lat = coords[1];
+          const mag = p.mag || 0;
+          const depth = getDepth(f);
+
+          let color = depth > 100 ? '#ef4444' : depth > 50 ? '#f59e0b' : '#22c55e';
+          const radius = Math.max(5, Math.min(16, mag * 2.4));
+
+          const marker = L.circleMarker([lat, lng], {
+            radius, fillColor: color, color: '#fff', weight: 1.5, opacity: 0.95, fillOpacity: 0.8
+          }).addTo(markersLayer);
+
+          marker.bindPopup(`
+            <b>M${mag.toFixed(1)}</b><br>
+            ${p.place || 'Unknown'}<br>
+            Depth: ${depth.toFixed(1)} km<br>
+            ${new Date(p.time).toLocaleString('en-GB', {timeZone:'UTC'})}
+          `);
+        });
+
+        if (top25Features.length > 0) {
+          try {
+            map.fitBounds(markersLayer.getBounds().pad(0.2), {maxZoom: 8});
+          } catch(e) {}
+        }
+      }
+
+      // fetchHistorical48h, drawChart, updateAll, classify functions remain the same as previous version
+      async function fetchHistorical48h() {
+        try {
+          const [pResp, mResp, kpResp] = await Promise.all([
+            fetch('https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json'),
+            fetch('https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json'),
+            fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json')
+          ]);
+
+          const pData = await pResp.json();
+          const mData = await mResp.json();
+          const kpDataRaw = await kpResp.json();
+
+          const pRows = pData.slice(1);
+          const mRows = mData.slice(1);
+
+          const normalizeKey = t => {
+            const d = new Date(t);
+            return isNaN(d) ? null : d.toISOString().slice(0,13);
+          };
+
+          const speedMap = new Map();
+          pRows.forEach(r => {
+            if (Array.isArray(r) && r[0] && r[2] != null) {
+              const s = parseFloat(r[2]);
+              const key = normalizeKey(r[0]);
+              if (!isNaN(s) && key) speedMap.set(key, s);
+            }
+          });
+
+          const bzMap = new Map();
+          mRows.forEach(r => {
+            if (Array.isArray(r) && r[0] && r[3] != null) {
+              const b = parseFloat(r[3]);
+              const key = normalizeKey(r[0]);
+              if (!isNaN(b) && key) bzMap.set(key, b);
+            }
+          });
+
+          const kpMap = new Map();
+          kpDataRaw.forEach(row => {
+            if (row?.time_tag && row?.Kp != null) {
+              const k = parseFloat(row.Kp);
+              const key = normalizeKey(row.time_tag);
+              if (!isNaN(k) && key) {
+                kpMap.set(key, k);
+              }
+            }
+          });
+
+          const allTimes = [...new Set([
+            ...[...speedMap.keys()],
+            ...[...bzMap.keys()],
+            ...[...kpMap.keys()]
+          ])].sort();
+          const lastTimeStr = allTimes[allTimes.length-1];
+          const lastTime = lastTimeStr ? new Date(`${lastTimeStr}:00:00Z`) : new Date();
+          const cutoffMs = daysShown * 24 * 60 * 60 * 1000;
+          const cutoff = new Date(lastTime.getTime() - cutoffMs);
+          MAX_POINTS = Math.ceil(daysShown * 24);
+
+          const merged = allTimes
+            .filter(t => new Date(`${t}:00:00Z`) >= cutoff)
+            .map(t => ({
+              time: t,
+              speed: speedMap.get(t) || null,
+              bz: bzMap.get(t) || null,
+              kp: kpMap.get(t) || null
+            }));
+
+          const hourMap = new Map();
+          merged.forEach(item => {
+            const hourKey = item.time;
+            if (!hourMap.has(hourKey)) hourMap.set(hourKey, {speed:[], bz:[], kp:[]});
+            const entry = hourMap.get(hourKey);
+            if (item.speed != null) entry.speed.push(item.speed);
+            if (item.bz != null) entry.bz.push(item.bz);
+            if (item.kp != null) entry.kp.push(item.kp);
+          });
+
+          timeLabels = []; timeStamps = []; speedData = []; bzData = []; kpData = [];
+          Array.from(hourMap.keys()).sort().forEach(key => {
+            const e = hourMap.get(key);
+            const avgSpeed = e.speed.length ? e.speed.reduce((a,b)=>a+b,0)/e.speed.length : null;
+            const avgBz = e.bz.length ? e.bz.reduce((a,b)=>a+b,0)/e.bz.length : null;
+            const avgKp = e.kp.length ? e.kp.reduce((a,b)=>a+b,0)/e.kp.length : null;
+            timeLabels.push(key.slice(11)+':00');
+            timeStamps.push(new Date(`${key}:00:00Z`));
+            speedData.push(avgSpeed);
+            bzData.push(avgBz);
+            kpData.push(avgKp);
+          });
+
+            if (timeLabels.length > MAX_POINTS) {
+            timeLabels = timeLabels.slice(-MAX_POINTS);
+            timeStamps = timeStamps.slice(-MAX_POINTS);
+            speedData = speedData.slice(-MAX_POINTS);
+            bzData = bzData.slice(-MAX_POINTS);
+            kpData = kpData.slice(-MAX_POINTS);
+          }
+        } catch(e) { console.warn('Historical data error:', e); }
+      }
+
+      function drawChart() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0,0,w,h);
+
+        if (timeLabels.length === 0) {
+          ctx.fillStyle = '#8aa0b8';
+          ctx.font = '14px sans-serif';
+          ctx.fillText('📊 Waiting for trend data …', 40, 80);
+          return;
+        }
+
+        const padL=55, padR=30, padT=25, padB=35;
+        const plotW = w - padL - padR;
+        const plotH = h - padT - padB;
+
+        const validBz = bzData.filter(v=>v!==null);
+        const validSpd = speedData.filter(v=>v!==null);
+          const validKp = kpData.filter(v=>v!==null);
+          const bzMin = Math.min(-15, ...(validBz.length ? validBz : [0]));
+          const bzMax = Math.max(15, ...(validBz.length ? validBz : [0]));
+          const spdMin = 250;
+          const spdMax = Math.max(750, validSpd.length ? Math.max(...validSpd) : 400) + 80;
+          const kpMin = 0;
+          const kpMax = 9;
+
+          const x = i => padL + (i / (timeLabels.length-1)) * plotW;
+          const yBz = v => padT + plotH - ((v - bzMin) / (bzMax - bzMin)) * plotH;
+          const ySpd = v => padT + plotH - ((v - spdMin) / (spdMax - spdMin)) * plotH;
+          const yKp = v => padT + plotH - ((v - kpMin) / (kpMax - kpMin)) * (plotH * 0.4) - (plotH * 0.1);
+        for (let i=0; i<=4; i++) {
+          const yy = padT + (i/4)*plotH;
+          ctx.beginPath(); ctx.moveTo(padL,yy); ctx.lineTo(w-padR,yy); ctx.stroke();
+        }
+
+        ctx.strokeStyle = '#ff9f43'; ctx.setLineDash([6,6]); ctx.lineWidth=1.2;
+        const y450 = ySpd(450);
+        ctx.beginPath(); ctx.moveTo(padL,y450); ctx.lineTo(w-padR,y450); ctx.stroke();
+        ctx.fillStyle='#ff9f43'; ctx.font='10px sans-serif';
+        ctx.fillText('450 km/s', w-padR-55, y450-6);
+        ctx.setLineDash([]);
+
+        ctx.strokeStyle = '#5f7fa0'; ctx.setLineDash([3,4]);
+        ctx.beginPath(); ctx.moveTo(padL, yBz(0)); ctx.lineTo(w-padR, yBz(0)); ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (quakeEvents.length && timeStamps.length > 0) {
+          const minTime = timeStamps[0].getTime();
+          const maxTime = timeStamps[timeStamps.length-1].getTime();
+          const timeSpan = Math.max(1, maxTime - minTime);
+          const magMin = Math.floor(minMagnitude);
+          const magMax = 8;
+          const barBase = h - padB;
+          const barMaxHeight = plotH * 0.35;
+
+          quakeEvents.forEach(event => {
+            const t = event.time.getTime();
+            if (t < minTime || t > maxTime) return;
+            const px = padL + ((t - minTime) / timeSpan) * plotW;
+            const normalizedMag = Math.min(magMax, Math.max(magMin, event.mag));
+            const barHeight = ((normalizedMag - magMin) / (magMax - magMin)) * barMaxHeight + 6;
+            const barTop = barBase - barHeight;
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 107, 107, 0.95)';
+            ctx.lineWidth = 4;
+            ctx.moveTo(px, barBase);
+            ctx.lineTo(px, barTop);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(px, barTop, 4, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 107, 107, 0.95)';
+            ctx.fill();
+          });
+        }
+
+        ctx.strokeStyle = '#4dabf7'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); let first=true;
+        for (let i=0; i<bzData.length; i++) {
+          if (bzData[i]===null) continue;
+          if (first) { ctx.moveTo(x(i), yBz(bzData[i])); first=false; }
+          else ctx.lineTo(x(i), yBz(bzData[i]));
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = '#f4a261'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); first=true;
+        for (let i=0; i<speedData.length; i++) {
+          if (speedData[i]===null) continue;
+          if (first) { ctx.moveTo(x(i), ySpd(speedData[i])); first=false; }
+          else ctx.lineTo(x(i), ySpd(speedData[i]));
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = '#34d399'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); first=true;
+        for (let i=0; i<kpData.length; i++) {
+          if (kpData[i]===null) continue;
+          if (first) { ctx.moveTo(x(i), yKp(kpData[i])); first=false; }
+          else ctx.lineTo(x(i), yKp(kpData[i]));
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = '#34d399'; ctx.font = '10px sans-serif';
+        ctx.fillText('Kp scale 0–9', w - padR - 90, padT + 16);
+        ctx.fillStyle = '#8aa0b8'; ctx.font = '10px sans-serif';
+        const labelCount = Math.min(timeLabels.length, 7);
+        if (labelCount > 1) {
+          for (let j=0; j<labelCount; j++) {
+            const i = Math.round(j * (timeLabels.length - 1) / (labelCount - 1));
+            ctx.fillText(timeLabels[i], x(i) - 18, h - padB + 18);
+          }
+        } else {
+          ctx.fillText(timeLabels[0], padL - 12, h - padB + 18);
+        }
+
+        const legendItems = [];
+        if (quakeEvents.length) {
+          legendItems.push({color: '#ff6b6b', label: 'Quakes (M4+ height)'});
+        }
+        legendItems.push({color: '#4dabf7', label: 'Bz (nT)'});
+        legendItems.push({color: '#f4a261', label: 'Speed (km/s)'});
+        legendItems.push({color: '#34d399', label: 'Kp index'});
+
+        const legendStart = padL;
+        const legendEnd = w - padR;
+        const legendWidth = legendEnd - legendStart;
+        const legendSlot = legendWidth / legendItems.length;
+
+        ctx.font = '11px sans-serif';
+        legendItems.forEach((item, index) => {
+          const xPos = Math.round(legendStart + index * legendSlot + 2);
+          ctx.fillStyle = item.color;
+          ctx.fillRect(xPos, 12, 13, 13);
+          ctx.fillStyle = '#e0e8f0';
+          ctx.fillText(item.label, xPos + 18, 22);
+        });
+      }
+
+      async function updateAll() {
+        errorMsgEl.textContent = '';
+        try {
+          const [sw, mag, kpObj, eqFeatures] = await Promise.all([
+            fetchSolarWind(), fetchMagData(), fetchKp(), fetchEarthquakes()
+          ]);
+
+          const speed = sw?.speed ?? null;
+          const bz = mag?.bz ?? null;
+          const kp = kpObj?.kp ?? null;
+
+          swSpeedEl.textContent = speed != null ? speed.toFixed(0) : '—';
+          bzValueEl.textContent = bz != null ? bz.toFixed(1) : '—';
+          kpValueEl.textContent = kp != null ? kp.toFixed(1) : '—';
+
+          const sc = classifySpeed(speed), bc = classifyBz(bz), kc = classifyKp(kp);
+          chHssBadge.textContent = sc.text; chHssBadge.className = `badge ${sc.cls}`;
+          bzBadge.textContent = bc.text; bzBadge.className = `badge ${bc.cls}`;
+          kpBadge.textContent = kc.text; kpBadge.className = `badge ${kc.cls}`;
+
+          updateTimeEl.textContent = `🕒 Updated: ${new Date().toLocaleTimeString()}`;
+
+          const top25 = renderQuakes(eqFeatures);
+          updateMap(top25);
+          await fetchHistorical48h();
+          const historyStart = timeStamps.length ? timeStamps[0] : new Date(Date.now() - 48 * 60 * 60 * 1000);
+          const historyEnd = timeStamps.length ? timeStamps[timeStamps.length-1] : new Date();
+          quakeEvents = eqFeatures
+            .filter(f => (f.properties?.mag ?? 0) >= minMagnitude)
+            .map(f => ({
+              time: new Date(f.properties?.time),
+              mag: f.properties?.mag ?? 0,
+              place: f.properties?.place || 'Unknown'
+            }))
+            .filter(e => e.time instanceof Date && !isNaN(e.time) && e.time >= historyStart && e.time <= historyEnd)
+            .sort((a,b) => a.time - b.time);
+          drawChart();
+        } catch(e) {
+          errorMsgEl.textContent = '⚠️ Fetch error — try Refresh';
+          console.error(e);
+        }
+      }
+
+      function updateControlLabels() {
+        daysValue.textContent = daysShown;
+        magValue.textContent = minMagnitude.toFixed(1);
+        chartTitle.textContent = `📈 ${daysShown}-day${daysShown > 1 ? '' : ''} trend (IMF Bz & solar wind speed)`;
+        quakeTitle.textContent = `📋 Recent significant earthquakes (past 7 days, M≥${minMagnitude.toFixed(1)}, top 25)`;
+      }
+
+      daysSlider.addEventListener('change', (e) => {
+        daysShown = parseInt(e.target.value);
+        updateControlLabels();
+        updateAll();
+      });
+
+      magSlider.addEventListener('change', (e) => {
+        minMagnitude = parseFloat(e.target.value);
+        updateControlLabels();
+        updateAll();
+      });
+
+      updateControlLabels();
+      updateAll();
+      setInterval(updateAll, REFRESH_MS);
+      refreshBtn.addEventListener('click', updateAll);
+      fitMapBtn.addEventListener('click', () => map && map.setView([20,0], 2));
+      window.addEventListener('resize', drawChart);
+    })();
+  </script>
+</body>
+</html>
